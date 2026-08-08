@@ -1,16 +1,7 @@
 smolagents
-
-# Pinned to an exact version, not a range: starting with 1.77.0, litellm added
-# a hard dependency on `fastuuid` (a Rust/PyO3 package), and starting with
-# 1.92.0 litellm itself bundles a compiled Rust extension. Neither publishes
-# musllinux wheels, and Zerops' Python 3.11 runtime prepare container is
-# musl-based (Alpine) with no C/Rust toolchain - so pip falls back to
-# building from source and fails on "linker `cc` not found". 1.76.0 is the
-# newest release that ships a pure-Python wheel with no Rust dependency at
-# all. If you bump this, re-check that the new version - and any minor/patch
-# releases pip might resolve to - doesn't reintroduce fastuuid.
-litellm==1.76.0
-gradio
+openai
+fastapi
+uvicorn
 matplotlib
 pandas
 python-dotenv
