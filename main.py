@@ -18,7 +18,7 @@ anything custom-built.
 """
 
 import os
-
+import litellm
 import gradio as gr
 from dotenv import load_dotenv
 from smolagents import (
@@ -33,7 +33,7 @@ from smolagents import (
 from smolagents.gradio_ui import pull_messages_from_step
 
 import tools  # query_transactions + create_chart
-
+litellm.drop_params = True
 load_dotenv()
 
 # --- Model config -------------------------------------------------------
