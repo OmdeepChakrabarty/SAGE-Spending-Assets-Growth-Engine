@@ -1,0 +1,307 @@
+/* style.css
+   -----------
+   Hand-written, no framework. Same dark/emerald look the project already
+   had, just implemented as plain CSS custom properties instead of a
+   component library's theme object. */
+
+:root {
+  --bg: #0b1120;
+  --panel-bg: #111827;
+  --panel-bg-alt: #0f172a;
+  --border: #1f2937;
+  --text: #e2e8f0;
+  --text-subdued: #94a3b8;
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-soft: rgba(16, 185, 129, 0.12);
+  --error: #f87171;
+  --error-soft: rgba(248, 113, 113, 0.12);
+  --income: #34d399;
+  --radius: 14px;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+}
+
+header {
+  padding: 28px 16px 8px 16px;
+  text-align: center;
+}
+
+header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  background: linear-gradient(135deg, #34d399, #10b981 45%, #f5d590);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  display: inline-block;
+}
+
+header p {
+  margin: 6px 0 0 0;
+  color: var(--text-subdued);
+  font-size: 0.95rem;
+}
+
+.layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---- Chat panel ---- */
+
+#chat-panel {
+  height: 72vh;
+  min-height: 480px;
+}
+
+#chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bubble {
+  max-width: 88%;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.bubble.user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: var(--text);
+}
+
+.bubble.assistant {
+  align-self: flex-start;
+  background: var(--panel-bg-alt);
+  border: 1px solid var(--border);
+  width: 100%;
+}
+
+.bubble.assistant.final {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: var(--accent-soft);
+}
+
+.bubble.assistant.error {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: var(--error-soft);
+  color: var(--error);
+}
+
+.bubble.assistant.streaming {
+  opacity: 0.75;
+}
+
+.bubble-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-subdued);
+  margin-bottom: 6px;
+}
+
+.bubble-content pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.bubble-content img {
+  max-width: 100%;
+  border-radius: 8px;
+  display: block;
+  margin-top: 4px;
+}
+
+#chat-form {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+#chat-input {
+  flex: 1;
+  background: var(--panel-bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+}
+
+#chat-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+button {
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+#send-btn {
+  background: var(--accent-hover);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 0 18px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+#send-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.examples {
+  padding: 0 12px 12px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.example-chip {
+  background: var(--panel-bg-alt);
+  border: 1px solid var(--border);
+  color: var(--text-subdued);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 0.78rem;
+}
+
+.example-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* ---- Database panel ---- */
+
+#db-panel {
+  height: 72vh;
+  min-height: 480px;
+}
+
+#db-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+#db-panel-header h2 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+#db-count {
+  color: var(--text-subdued);
+  font-size: 0.78rem;
+}
+
+#refresh-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-subdued);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+}
+
+#refresh-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+#db-table-wrap {
+  flex: 1;
+  overflow: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-bg);
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--text-subdued);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+tbody td.expense {
+  color: var(--text);
+}
+
+tbody td.income {
+  color: var(--income);
+}
+
+footer {
+  text-align: center;
+  color: var(--text-subdued);
+  font-size: 0.75rem;
+  padding: 12px;
+}
