@@ -183,27 +183,87 @@ def stream_agent_response(message, history):  # noqa: ARG001 - history unused, a
 # app working across both without pinning a single gradio version.
 type_messages_kwarg = {"type": "messages"} if gr.__version__.startswith("5") else {}
 
-chatbot = gr.Chatbot(label="SAGE - Spending, Assets & Growth Engine", height=500, **type_messages_kwarg)
-
-demo = gr.ChatInterface(
-    fn=stream_agent_response,
-    chatbot=chatbot,
-    title="SAGE - Spending, Assets & Growth Engine",
-    description=(
-        "Ask about your own spending and income - e.g. \"How much did I spend on "
-        "groceries in June?\" or \"Show me my monthly spending trend for the year.\" "
-        "You can also ask SAGE to add, correct, or remove a transaction. "
-        "Watch the steps stream in live as it writes and runs SQL."
-    ),
-    examples=[
-        "How much did I spend on dining out in December?",
-        "Show me my spending by category as a chart.",
-        "Did I spend anything on travel in March 2025?",
-        "Add a $45 dining out charge at Local Diner on 2025-07-10.",
-    ],
-    **type_messages_kwarg,
+# --- Look & feel ------------------------------------------------------------
+# This is a reskin, not a rebuild: `stream_agent_response` above - the actual
+# streaming bridge between the agent and the chat - is untouched. `ChatInterface`
+# still owns all of that plumbing (message history, the streaming generator,
+# retry/undo, examples). The only change is *how it's wrapped*: a `Blocks`
+# shell adds a branded HTML header above it, a custom theme, and CSS variable
+# overrides, which is enough to move it away from the stock Gradio look
+# without reimplementing the chat/streaming machinery in plain HTML/JS.
+SAGE_THEME = gr.themes.Soft(
+    primary_hue="emerald",
+    neutral_hue="slate",
+    font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "system-ui", "sans-serif"],
+    font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "ui-monospace", "monospace"],
 )
+
+# Gradio exposes its component colors/spacing as CSS custom properties
+# (documented at https://www.gradio.app/guides/theming-guide#css-variables) -
+# overriding them here is what keeps this reskin resilient to Gradio's own
+# internal class names changing between versions, instead of fighting
+# selectors like `.message.bot` that shift release to release.
+SAGE_CSS = """
+:root {
+    --body-background-fill: #0b1120;
+    --background-fill-primary: #111827;
+    --background-fill-secondary: #0f172a;
+    --border-color-primary: #1f2937;
+    --block-background-fill: #111827;
+    --block-border-color: #1f2937;
+    --block-radius: 16px;
+    --body-text-color: #e2e8f0;
+    --body-text-color-subdued: #94a3b8;
+    --input-background-fill: #0f172a;
+    --color-accent: #10b981;
+    --button-primary-background-fill: #059669;
+    --button-primary-background-fill-hover: #047857;
+    --button-primary-text-color: #ffffff;
+}
+
+.gradio-container { max-width: 880px !important; margin: 0 auto !important; }
+footer { display: none !important; }   /* hides the "Built with Gradio" watermark */
+
+#sage-header { padding: 28px 8px 4px 8px; text-align: center; }
+#sage-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0;
+    background: linear-gradient(135deg, #34d399, #10b981 45%, #f5d590);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+#sage-header p {
+    margin: 6px 0 0 0;
+    color: var(--body-text-color-subdued);
+    font-size: 0.95rem;
+}
+"""
+
+SAGE_HEADER_HTML = """
+<div id="sage-header">
+  <h1>SAGE</h1>
+  <p>Spending, Assets &amp; Growth Engine — ask about your spending, or ask it to fix a transaction.</p>
+</div>
+"""
+
+with gr.Blocks(title="SAGE - Spending, Assets & Growth Engine") as demo:
+    gr.HTML(SAGE_HEADER_HTML)
+    chatbot = gr.Chatbot(show_label=False, height=520, **type_messages_kwarg)
+    gr.ChatInterface(
+        fn=stream_agent_response,
+        chatbot=chatbot,
+        examples=[
+            "How much did I spend on dining out in December?",
+            "Show me my spending by category as a chart.",
+            "Did I spend anything on travel in March 2025?",
+            "Add a $45 dining out charge at Local Diner on 2025-07-10.",
+        ],
+        **type_messages_kwarg,
+    )
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port)
+    demo.launch(server_name="0.0.0.0", server_port=port, theme=SAGE_THEME, css=SAGE_CSS)
