@@ -1,0 +1,54 @@
+# zerops.yaml
+# Deployment config for SAGE (Spending, Assets & Growth Engine) on Zerops.
+# Reference: https://docs.zerops.io/python/how-to/build-pipeline
+#
+# Set CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_KEY, MODEL_NAME (and PORT, if you
+# want something other than 7860) as secret env variables on the Zerops
+# service itself - see the README's Zerops deployment section. Don't put
+# real secrets in this file or commit a real .env; only .env.example ships
+# in the repo.
+
+zerops:
+  - setup: app
+
+    # ==== how to build your application ====
+    build:
+      # Python 3.11, as requested.
+      base: python@3.11
+
+      # Nothing to compile for a plain Python app - just ship the source.
+      deployFiles:
+        - main.py
+        - seed_data.py
+        - tools.py
+        - requirements.txt
+
+      # requirements.txt isn't part of deployFiles' runtime copy by default -
+      # the runtime "prepare" container is separate from the build container,
+      # so this makes it available there for the pip install step below.
+      addToRunPrepare:
+        - requirements.txt
+
+    # ==== how to run your application ====
+    run:
+      base: python@3.11
+
+      # The Gradio chat interface listens on this port (see PORT in .env.example
+      # and main.py's demo.launch(server_port=...)).
+      ports:
+        - port: 7860
+          httpSupport: true
+
+      # Installs dependencies once per deploy into the runtime environment
+      # (cached between deploys unless requirements.txt changes).
+      prepareCommands:
+        - python3 -m pip install --ignore-installed -r requirements.txt
+
+      # Runs before the app starts on every container start/restart - builds
+      # (or rebuilds) transactions.db from the seed script, so the runtime
+      # container always has a database to query against.
+      initCommands:
+        - python3 seed_data.py
+
+      # REQUIRED. Starts the Gradio app.
+      start: python3 main.py

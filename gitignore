@@ -1,0 +1,31 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.Python
+build/
+dist/
+*.egg
+.venv/
+venv/
+env/
+
+# SQLite database + generated chart
+transactions.db
+*.sqlite3
+latest_chart.png
+
+# Gradio
+.gradio/
+flagged/
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
+*.swp
