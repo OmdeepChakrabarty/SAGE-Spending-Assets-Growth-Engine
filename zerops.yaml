@@ -2,11 +2,10 @@
 # Deployment config for SAGE (Spending, Assets & Growth Engine) on Zerops.
 # Reference: https://docs.zerops.io/python/how-to/build-pipeline
 #
-# Set CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_KEY, MODEL_NAME (and PORT, if you
-# want something other than 7860) as secret env variables on the Zerops
-# service itself - see the README's Zerops deployment section. Don't put
-# real secrets in this file or commit a real .env; only .env.example ships
-# in the repo.
+# Set OPENROUTER_API_KEY and MODEL_NAME (and PORT, if you want something
+# other than 7860) as secret env variables on the Zerops service itself -
+# see the README's Zerops deployment section. Don't put real secrets in
+# this file or commit a real .env; only .env.example ships in the repo.
 
 zerops:
   - setup: app
@@ -16,12 +15,15 @@ zerops:
       # Python 3.11, as requested.
       base: python@3.11
 
-      # Nothing to compile for a plain Python app - just ship the source.
+      # Nothing to compile for a plain Python app - just ship the source,
+      # including static/ (the hand-written HTML/CSS/JS frontend main.py
+      # serves - no Gradio involved).
       deployFiles:
         - main.py
         - seed_data.py
         - tools.py
         - requirements.txt
+        - static
 
       # requirements.txt isn't part of deployFiles' runtime copy by default -
       # the runtime "prepare" container is separate from the build container,
@@ -33,8 +35,8 @@ zerops:
     run:
       base: python@3.11
 
-      # The Gradio chat interface listens on this port (see PORT in .env.example
-      # and main.py's demo.launch(server_port=...)).
+      # The chat UI listens on this port (see PORT in .env.example and
+      # main.py's uvicorn.run(..., port=...)).
       ports:
         - port: 7860
           httpSupport: true
@@ -50,5 +52,5 @@ zerops:
       initCommands:
         - python3 seed_data.py
 
-      # REQUIRED. Starts the Gradio app.
+      # REQUIRED. Starts the FastAPI app (uvicorn) serving the chat UI.
       start: python3 main.py
