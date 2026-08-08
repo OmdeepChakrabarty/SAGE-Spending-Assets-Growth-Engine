@@ -1,4 +1,6 @@
 # SAGE — Spending, Assets & Growth Engine
+<img width="1920" height="1060" alt="image" src="https://github.com/user-attachments/assets/be8a87e3-e536-4bac-a3f9-52b17a6ca644" />
+
 
 A single [smolagents](https://github.com/huggingface/smolagents) `CodeAgent` that acts as a conversational
 interface over a local SQLite ledger: it answers plain-English questions about your finances, generates
