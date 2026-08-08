@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SAGE - Spending, Assets &amp; Growth Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>SAGE</h1>
+    <p>Spending, Assets &amp; Growth Engine — ask about your spending, or ask it to fix a transaction.</p>
+  </header>
+
+  <main class="layout">
+    <!-- Chat panel -->
+    <section class="panel" id="chat-panel">
+      <div id="chat-log"></div>
+      <div class="examples" id="examples">
+        <button class="example-chip" type="button">How much did I spend on dining out in December?</button>
+        <button class="example-chip" type="button">Show me my spending by category as a chart.</button>
+        <button class="example-chip" type="button">Add a $45 dining out charge at Local Diner on 2025-07-10.</button>
+        <button class="example-chip" type="button">Did I spend anything on travel in March 2025?</button>
+      </div>
+      <form id="chat-form">
+        <input
+          id="chat-input"
+          type="text"
+          autocomplete="off"
+          placeholder="Ask about your spending, or ask SAGE to add/fix/delete a transaction…"
+        />
+        <button id="send-btn" type="submit">Send</button>
+      </form>
+    </section>
+
+    <!-- Database panel -->
+    <section class="panel" id="db-panel">
+      <div id="db-panel-header">
+        <h2>Database — transactions</h2>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span id="db-count"></span>
+          <button id="refresh-btn" type="button">Refresh</button>
+        </div>
+      </div>
+      <div id="db-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>id</th>
+              <th>date</th>
+              <th>merchant</th>
+              <th>amount</th>
+              <th>category</th>
+            </tr>
+          </thead>
+          <tbody id="db-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>transactions.db, live — refreshes automatically after every chat turn</footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
