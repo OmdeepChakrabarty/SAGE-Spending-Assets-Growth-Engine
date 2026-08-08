@@ -4,61 +4,68 @@ main.py
 SAGE - Spending, Assets & Growth Engine. A single smolagents CodeAgent that
 answers natural-language questions about a personal transactions table, and
 can also add, correct, or remove transactions on request, by writing and
-running SQL - wired into a Gradio chat interface that streams the agent's
-steps live as they happen.
+running SQL.
 
-Style note: this stays as close as possible to the smolagents_examples
-pattern (smol_claude.py, smol_gradio.py) - one model, a couple of plain
-@tool functions in tools.py, no manager/managed-agent layers, no extra
-classes. The one piece of "framework" code here is the streaming bridge
-into Gradio, and even that is a straight, commented adaptation of
-smolagents' own stream_to_gradio / GradioUI._stream_response helpers
-(see smolagents/gradio_ui.py in the installed package) rather than
-anything custom-built.
+The UI is a small FastAPI app serving a hand-written HTML/CSS/JS frontend
+(in static/) - no Gradio. The agent's steps stream to the browser over
+Server-Sent Events (SSE), and a second endpoint lets the page show the raw
+`transactions` table live, so you can actually see the database, not just
+take the agent's word for it.
+
+Style note: the agent definition itself stays exactly as small and explicit
+as the smolagents_examples pattern (smol_claude.py) - one model, a few
+plain @tool functions in tools.py, no manager/managed-agent layers. The
+FastAPI layer below is the minimum needed to replace what Gradio was doing:
+serve a page, stream steps, and answer a couple of small JSON endpoints.
 """
 
+import json
 import os
-import litellm
-import gradio as gr
+import sqlite3
+
+import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from smolagents import (
-    CodeAgent,
-    LiteLLMModel,
     ActionStep,
-    PlanningStep,
-    FinalAnswerStep,
     ChatMessageStreamDelta,
+    CodeAgent,
+    FinalAnswerStep,
+    OpenAIServerModel,
+    PlanningStep,
     agglomerate_stream_deltas,
 )
-from smolagents.gradio_ui import pull_messages_from_step
 
-import tools  # query_transactions + create_chart
-litellm.drop_params = True
+import tools  # query_transactions + modify_transactions + create_chart
+
 load_dotenv()
 
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
 # --- Model config -------------------------------------------------------
-# Cloudflare Workers AI, called through LiteLLM. Keeping the model id in
-# one variable means swapping the small/large model is a one-line change:
-#   MODEL_NAME = "cloudflare/@cf/meta/llama-3.1-8b-instruct"      (fast)
-#   MODEL_NAME = "cloudflare/@cf/meta/llama-3.3-70b-instruct-fp8" (stronger)
-MODEL_NAME = os.getenv("MODEL_NAME", "cloudflare/@cf/meta/llama-3.1-8b-instruct")
+# OpenRouter, called through smolagents' OpenAIServerModel - OpenRouter
+# exposes a plain OpenAI-compatible endpoint, so this talks to it directly
+# with the `openai` client under the hood, no LiteLLM in the middle.
+#   MODEL_NAME = "openrouter/free"                       (routes to whichever
+#                                                           free model is
+#                                                           available - the
+#                                                           default here)
+#   MODEL_NAME = "meta-llama/llama-3.1-8b-instruct:free"  (a specific free
+#                                                           model instead of
+#                                                           the router)
+MODEL_NAME = os.getenv("MODEL_NAME", "openrouter/free")
 
-CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
-CLOUDFLARE_API_KEY = os.getenv("CLOUDFLARE_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_KEY:
-    raise RuntimeError(
-        "CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_KEY must be set (see .env.example)."
-    )
+if not OPENROUTER_API_KEY:
+    raise RuntimeError("OPENROUTER_API_KEY must be set (see .env.example).")
 
-# LiteLLMModel is a thin wrapper around litellm.completion(). Cloudflare's
-# Workers AI exposes an OpenAI-compatible endpoint at this URL, built from
-# the account id - see:
-# https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/
-model = LiteLLMModel(
+model = OpenAIServerModel(
     model_id=MODEL_NAME,
-    api_base=f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1",
-    api_key=CLOUDFLARE_API_KEY,
+    api_base="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_API_KEY,
 )
 
 # --- Agent scope & guardrails --------------------------------------------
@@ -105,165 +112,125 @@ agent = CodeAgent(
 )
 
 
-# --- Streaming bridge into Gradio ----------------------------------------
-def stream_agent_response(message, history):  # noqa: ARG001 - history unused, agent keeps its own memory
-    """Runs the agent on `message` and yields a growing list of gr.ChatMessage.
+# --- Step events -----------------------------------------------------------
+def step_to_events(step) -> list[dict]:
+    """Turns one finished agent step into plain-dict events for the SSE stream.
 
-    This is a trimmed-down, commented rewrite of smolagents'
-    GradioUI._stream_response (smolagents/gradio_ui.py). agent.run(...,
-    stream=True) yields step objects as the agent works - ActionStep /
-    PlanningStep / FinalAnswerStep once a step finishes, and
-    ChatMessageStreamDelta tokens while the model is still generating.
-    pull_messages_from_step() turns a finished step into one or more
-    gr.ChatMessage bubbles - this is how the "writing SQL...", "running
-    query...", "found N rows..." print() statements inside tools.py
-    surface live as their own chat bubbles (they show up as that step's
-    execution logs) instead of only appearing after the whole answer is
-    done.
+    This is a small, hand-written equivalent of smolagents' own
+    pull_messages_from_step (smolagents/gradio_ui.py) - written from scratch
+    instead of imported, so this project has no Gradio dependency at all,
+    not even for this one helper. Each dict has a "type" the frontend
+    switches on (see static/app.js) and a "content" string to display.
     """
-    tools.last_chart_path = None  # clear any chart left over from the last turn
+    events = []
+    if isinstance(step, ActionStep):
+        if step.code_action:
+            events.append({"type": "code", "content": step.code_action})
+        if step.observations:
+            # This is where the "Running SQL: ...", "Query returned N
+            # row(s).", "Modifying data: ...", "Generating bar chart: ..."
+            # print() statements from tools.py show up - CodeAgent captures
+            # a tool's stdout as this step's observations.
+            events.append({"type": "log", "content": step.observations.strip()})
+        if step.error:
+            events.append({"type": "error", "content": str(step.error)})
+    elif isinstance(step, PlanningStep):
+        events.append({"type": "plan", "content": step.plan})
+    elif isinstance(step, FinalAnswerStep):
+        events.append({"type": "final", "content": str(step.output)})
+    return events
 
-    all_messages = []
-    accumulated_deltas = []
-    streaming_idx = None
 
-    try:
-        for event in agent.run(message, stream=True, reset=False):
-            if isinstance(event, (ActionStep, PlanningStep, FinalAnswerStep)):
-                # A step just finished - drop the in-progress streaming
-                # bubble (if any) and replace it with the finished messages.
-                if streaming_idx is not None:
-                    all_messages.pop(streaming_idx)
-                    streaming_idx = None
+def sse(event: dict) -> str:
+    """Formats one dict as a Server-Sent Events data line."""
+    return f"data: {json.dumps(event)}\n\n"
 
-                for msg in pull_messages_from_step(event, skip_model_outputs=agent.stream_outputs):
-                    all_messages.append(gr.ChatMessage(role=msg.role, content=msg.content, metadata=msg.metadata))
-                    yield all_messages
 
-                accumulated_deltas = []
+# --- FastAPI app -------------------------------------------------------------
+app = FastAPI(title="SAGE - Spending, Assets & Growth Engine")
 
-            elif isinstance(event, ChatMessageStreamDelta):
-                # The model is still generating this step's thought/code -
-                # show the tokens live in one growing bubble.
-                accumulated_deltas.append(event)
-                text = agglomerate_stream_deltas(accumulated_deltas).render_as_markdown()
-                msg = gr.ChatMessage(role="assistant", content=text)
-                if streaming_idx is None:
-                    streaming_idx = len(all_messages)
-                    all_messages.append(msg)
-                else:
-                    all_messages[streaming_idx] = msg
-                yield all_messages
 
-    except Exception as e:
-        # Error resilience: a malformed/ambiguous prompt, a step-limit hit,
-        # or a model/API hiccup should show up as a normal chat message,
-        # never crash the whole Gradio app.
-        all_messages.append(
-            gr.ChatMessage(
-                role="assistant",
-                content=f"Something went wrong answering that: {e}. Could you try rephrasing your question?",
+@app.get("/api/chat")
+def chat(message: str):
+    """Streams one agent turn to the browser as Server-Sent Events.
+
+    A plain (synchronous) generator is fine here - Starlette runs it in a
+    worker thread automatically when handed to StreamingResponse, so the
+    blocking agent.run() call doesn't block the server's event loop. This
+    is a straight rewrite of the same idea used for the Gradio version:
+    consume agent.run(message, stream=True) directly and turn each event
+    into something the UI can render as it happens, rather than waiting
+    for the whole answer.
+    """
+
+    def event_stream():
+        tools.last_chart_path = None  # clear any chart left over from the last turn
+        accumulated_deltas = []
+
+        try:
+            for event in agent.run(message, stream=True, reset=False):
+                if isinstance(event, ChatMessageStreamDelta):
+                    # The model is still generating this step's thought/code -
+                    # stream the growing text so the UI shows it live.
+                    accumulated_deltas.append(event)
+                    text = agglomerate_stream_deltas(accumulated_deltas).render_as_markdown()
+                    yield sse({"type": "delta", "content": text})
+                elif isinstance(event, (ActionStep, PlanningStep, FinalAnswerStep)):
+                    accumulated_deltas = []
+                    for e in step_to_events(event):
+                        yield sse(e)
+        except Exception as e:
+            # Error resilience: a malformed/ambiguous prompt, a step-limit
+            # hit, or a model/API hiccup should show up as a normal chat
+            # message, never crash the server or hang the page.
+            yield sse(
+                {
+                    "type": "error",
+                    "content": f"Something went wrong answering that: {e}. Could you try rephrasing your question?",
+                }
             )
-        )
-        yield all_messages
-        return
+            yield sse({"type": "done"})
+            return
 
-    # If create_chart ran this turn, attach the saved PNG as its own bubble.
-    if tools.last_chart_path:
-        all_messages.append(
-            gr.ChatMessage(role="assistant", content={"path": tools.last_chart_path, "mime_type": "image/png"})
-        )
-        yield all_messages
+        # If create_chart ran this turn, tell the page to fetch the image.
+        if tools.last_chart_path:
+            yield sse({"type": "chart", "content": "/api/chart"})
+
+        yield sse({"type": "done"})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# --- Gradio chat interface ------------------------------------------------
-# Gradio 5.x needs Chatbot(type="messages") to accept gr.ChatMessage objects;
-# Gradio 6 made "messages" the only format and dropped the parameter. This
-# one-line check (copied from smolagents' own GradioUI.create_app) keeps the
-# app working across both without pinning a single gradio version.
-type_messages_kwarg = {"type": "messages"} if gr.__version__.startswith("5") else {}
+@app.get("/api/transactions")
+def get_transactions():
+    """Returns every row in the transactions table as JSON.
 
-# --- Look & feel ------------------------------------------------------------
-# This is a reskin, not a rebuild: `stream_agent_response` above - the actual
-# streaming bridge between the agent and the chat - is untouched. `ChatInterface`
-# still owns all of that plumbing (message history, the streaming generator,
-# retry/undo, examples). The only change is *how it's wrapped*: a `Blocks`
-# shell adds a branded HTML header above it, a custom theme, and CSS variable
-# overrides, which is enough to move it away from the stock Gradio look
-# without reimplementing the chat/streaming machinery in plain HTML/JS.
-SAGE_THEME = gr.themes.Soft(
-    primary_hue="emerald",
-    neutral_hue="slate",
-    font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "system-ui", "sans-serif"],
-    font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "ui-monospace", "monospace"],
-)
+    This is what powers the "Database" panel in the UI - a direct read of
+    transactions.db, independent of anything the agent has said, so you can
+    always see the real state of the data.
+    """
+    conn = sqlite3.connect(tools.DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT id, date, merchant, amount, category FROM transactions ORDER BY date DESC, id DESC")
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
 
-# Gradio exposes its component colors/spacing as CSS custom properties
-# (documented at https://www.gradio.app/guides/theming-guide#css-variables) -
-# overriding them here is what keeps this reskin resilient to Gradio's own
-# internal class names changing between versions, instead of fighting
-# selectors like `.message.bot` that shift release to release.
-SAGE_CSS = """
-:root {
-    --body-background-fill: #0b1120;
-    --background-fill-primary: #111827;
-    --background-fill-secondary: #0f172a;
-    --border-color-primary: #1f2937;
-    --block-background-fill: #111827;
-    --block-border-color: #1f2937;
-    --block-radius: 16px;
-    --body-text-color: #e2e8f0;
-    --body-text-color-subdued: #94a3b8;
-    --input-background-fill: #0f172a;
-    --color-accent: #10b981;
-    --button-primary-background-fill: #059669;
-    --button-primary-background-fill-hover: #047857;
-    --button-primary-text-color: #ffffff;
-}
 
-.gradio-container { max-width: 880px !important; margin: 0 auto !important; }
-footer { display: none !important; }   /* hides the "Built with Gradio" watermark */
+@app.get("/api/chart")
+def get_chart():
+    """Serves the most recently generated chart PNG."""
+    return FileResponse(tools.CHART_PATH, media_type="image/png")
 
-#sage-header { padding: 28px 8px 4px 8px; text-align: center; }
-#sage-header h1 {
-    font-size: 2rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    margin: 0;
-    background: linear-gradient(135deg, #34d399, #10b981 45%, #f5d590);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-#sage-header p {
-    margin: 6px 0 0 0;
-    color: var(--body-text-color-subdued);
-    font-size: 0.95rem;
-}
-"""
 
-SAGE_HEADER_HTML = """
-<div id="sage-header">
-  <h1>SAGE</h1>
-  <p>Spending, Assets &amp; Growth Engine — ask about your spending, or ask it to fix a transaction.</p>
-</div>
-"""
+# Serves static/index.html at "/" and the rest of static/ (style.css,
+# app.js) alongside it. This is mounted last, after the /api/* routes
+# above, because Starlette matches routes in registration order - a Mount
+# on "/" would otherwise swallow every request, API routes included.
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
-with gr.Blocks(title="SAGE - Spending, Assets & Growth Engine") as demo:
-    gr.HTML(SAGE_HEADER_HTML)
-    chatbot = gr.Chatbot(show_label=False, height=520, **type_messages_kwarg)
-    gr.ChatInterface(
-        fn=stream_agent_response,
-        chatbot=chatbot,
-        examples=[
-            "How much did I spend on dining out in December?",
-            "Show me my spending by category as a chart.",
-            "Did I spend anything on travel in March 2025?",
-            "Add a $45 dining out charge at Local Diner on 2025-07-10.",
-        ],
-        **type_messages_kwarg,
-    )
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port, theme=SAGE_THEME, css=SAGE_CSS)
+    uvicorn.run(app, host="0.0.0.0", port=port)
